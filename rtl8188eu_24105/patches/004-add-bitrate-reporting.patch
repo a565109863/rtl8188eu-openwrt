@@ -1,0 +1,229 @@
+--- a/os_dep/linux/ioctl_cfg80211.c	2026-03-16 17:38:51.794146173 +0700
++++ b/os_dep/linux/ioctl_cfg80211.c	2026-03-16 17:38:11.444630235 +0700
+@@ -29,19 +29,22 @@
+ #endif
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
+-#define STATION_INFO_INACTIVE_TIME	BIT(NL80211_STA_INFO_INACTIVE_TIME)
+-#define STATION_INFO_LLID			BIT(NL80211_STA_INFO_LLID)
+-#define STATION_INFO_PLID			BIT(NL80211_STA_INFO_PLID)
+-#define STATION_INFO_PLINK_STATE	BIT(NL80211_STA_INFO_PLINK_STATE)
+-#define STATION_INFO_SIGNAL			BIT(NL80211_STA_INFO_SIGNAL)
+-#define STATION_INFO_TX_BITRATE		BIT(NL80211_STA_INFO_TX_BITRATE)
+-#define STATION_INFO_RX_PACKETS		BIT(NL80211_STA_INFO_RX_PACKETS)
+-#define STATION_INFO_TX_PACKETS		BIT(NL80211_STA_INFO_TX_PACKETS)
+-#define STATION_INFO_TX_FAILED		BIT(NL80211_STA_INFO_TX_FAILED)
+-#define STATION_INFO_LOCAL_PM		BIT(NL80211_STA_INFO_LOCAL_PM)
+-#define STATION_INFO_PEER_PM		BIT(NL80211_STA_INFO_PEER_PM)
+-#define STATION_INFO_NONPEER_PM		BIT(NL80211_STA_INFO_NONPEER_PM)
+-#define STATION_INFO_ASSOC_REQ_IES	0
++#define STATION_INFO_INACTIVE_TIME       BIT(NL80211_STA_INFO_INACTIVE_TIME)
++#define STATION_INFO_LLID                BIT(NL80211_STA_INFO_LLID)
++#define STATION_INFO_PLID                BIT(NL80211_STA_INFO_PLID)
++#define STATION_INFO_PLINK_STATE         BIT(NL80211_STA_INFO_PLINK_STATE)
++#define STATION_INFO_SIGNAL              BIT(NL80211_STA_INFO_SIGNAL)
++#define STATION_INFO_SIGNAL_AVG          BIT(NL80211_STA_INFO_SIGNAL_AVG)
++#define STATION_INFO_TX_BITRATE          BIT(NL80211_STA_INFO_TX_BITRATE)
++#define STATION_INFO_TX_PACKETS          BIT(NL80211_STA_INFO_TX_PACKETS)
++#define STATION_INFO_TX_FAILED           BIT(NL80211_STA_INFO_TX_FAILED)
++#define STATION_INFO_RX_BITRATE          BIT(NL80211_STA_INFO_RX_BITRATE)
++#define STATION_INFO_RX_PACKETS          BIT(NL80211_STA_INFO_RX_PACKETS)
++#define STATION_INFO_LOCAL_PM            BIT(NL80211_STA_INFO_LOCAL_PM)
++#define STATION_INFO_PEER_PM             BIT(NL80211_STA_INFO_PEER_PM)
++#define STATION_INFO_NONPEER_PM          BIT(NL80211_STA_INFO_NONPEER_PM)
++#define STATION_INFO_EXPECTED_THROUGHPUT BIT(NL80211_STA_INFO_EXPECTED_THROUGHPUT)
++#define STATION_INFO_ASSOC_REQ_IES       0
+ #endif /* Linux kernel >= 4.0.0 */
+ 
+ #define RTW_MAX_MGMT_TX_CNT (8)
+@@ -5995,71 +5998,126 @@
+ 	return psta;
+ }
+ 
+-static int	cfg80211_rtw_dump_station(struct wiphy *wiphy, struct net_device *ndev,
+-		int idx, u8 *mac, struct station_info *sinfo)
+-{
+-#define DBG_DUMP_STATION 0
++/* ==========================================================
++ * Ambil TX rate per STA
++ * ========================================================== */
++static void rtw_get_sta_txrate(_adapter *padapter, struct sta_info *psta, struct rate_info *rinfo)
++{
++    u8 rate = psta->cmn.ra_info.curr_tx_rate;
++    memset(rinfo, 0, sizeof(struct rate_info));
++
++    /* Audit log (Opsional, matikan jika sudah stabil) */
++    if (rate != psta->last_tx_rate) {
++        printk("RTW: [TX_AUDIT] MAC: %pM | Rate: 0x%02x\n", psta->cmn.mac_addr, rate);
++    }
++
++    /* Logic: 0x0c - 0x13 adalah MCS 0 - 7 */
++    if ((rate >= 0x0c && rate <= 0x13) || (psta->htpriv.ht_option == 1)) {
++        rinfo->flags |= RATE_INFO_FLAGS_MCS;
++        rinfo->mcs = (rate >= 0x10 && rate <= 0x13) ? (rate - 0x0c) : 7;
++        
++        rinfo->bw = (psta->htpriv.ht_cap.cap_info & IEEE80211_HT_CAP_SUP_WIDTH) ? 
++                    RATE_INFO_BW_40 : RATE_INFO_BW_20;
++        
++        if (psta->htpriv.ht_cap.cap_info & (IEEE80211_HT_CAP_SGI_20 | IEEE80211_HT_CAP_SGI_40))
++            rinfo->flags |= RATE_INFO_FLAGS_SHORT_GI;
++    } else {
++        rinfo->legacy = 540; // Default fallback aman
++    }
++    psta->last_tx_rate = rate;
++}
++
++// ==========================================================
++// Ambil RX rate per STA
++// ==========================================================
++static void rtw_get_sta_rxrate(struct sta_info *psta, struct rate_info *rinfo)
++{
++    u8 rate = psta->curr_rx_rate;
++    memset(rinfo, 0, sizeof(struct rate_info));
++
++    /* Gunakan mapping yang sama dengan TX untuk konsistensi */
++    if (rate >= 0x0c && rate <= 0x13) {
++        rinfo->flags |= RATE_INFO_FLAGS_MCS;
++        rinfo->mcs = (rate - 0x0c);
++        rinfo->bw = (psta->htpriv.ht_cap.cap_info & IEEE80211_HT_CAP_SUP_WIDTH) ? 
++                    RATE_INFO_BW_40 : RATE_INFO_BW_20;
++        
++        if (psta->htpriv.ht_cap.cap_info & (IEEE80211_HT_CAP_SGI_20 | IEEE80211_HT_CAP_SGI_40))
++            rinfo->flags |= RATE_INFO_FLAGS_SHORT_GI;
++    } else {
++        rinfo->legacy = 540;
++    }
++    psta->last_rx_rate = rate;
++}
++
++// ==========================================================
++// Dump info STA untuk cfg80211
++// ==========================================================
++static int cfg80211_rtw_dump_station(struct wiphy *wiphy, struct net_device *ndev,
++                                     int idx, u8 *mac, struct station_info *sinfo)
++{
++    _adapter *padapter = (_adapter *)rtw_netdev_priv(ndev);
++    struct sta_info *psta = rtw_sta_info_get_by_idx(&padapter->stapriv, idx, NULL);
++    struct rate_info rinfo;
++
++    if (!psta) return -ENOENT;
++
++    _rtw_memcpy(mac, psta->cmn.mac_addr, ETH_ALEN);
++    sinfo->filled = 0;
++
++    /* Signal & Inactive */
++    sinfo->filled |= STATION_INFO_SIGNAL | STATION_INFO_SIGNAL_AVG | STATION_INFO_INACTIVE_TIME;
++    sinfo->signal = sinfo->signal_avg = translate_percentage_to_dbm(psta->cmn.rssi_stat.rssi);
++    sinfo->inactive_time = rtw_get_passing_time_ms(psta->sta_stats.last_rx_time);
++
++    /* --- TX BITRATE --- */
++    rtw_get_sta_txrate(padapter, psta, &rinfo);
++    sinfo->filled |= STATION_INFO_TX_BITRATE;
++    memset(&sinfo->txrate, 0, sizeof(sinfo->txrate));
++
++    // OVERRIDE: Jika HT aktif, JANGAN biarkan dia lapor Legacy/54Mbps
++    if (psta->htpriv.ht_option == 1) {
++        sinfo->txrate.flags = RATE_INFO_FLAGS_MCS;
++        // Jika rinfo dapet MCS, pake itu. Jika rinfo gagal (Legacy), paksa lapor MCS 7.
++        sinfo->txrate.mcs = (rinfo.flags & RATE_INFO_FLAGS_MCS) ? rinfo.mcs : 7;
++        sinfo->txrate.bw = (psta->htpriv.ht_cap.cap_info & IEEE80211_HT_CAP_SUP_WIDTH) ? RATE_INFO_BW_40 : RATE_INFO_BW_20;
++        
++        // Cek flag GI dari deteksi rtw_get_sta_txrate (Dinamis: Short/Long GI)
++        if (rinfo.flags & RATE_INFO_FLAGS_SHORT_GI)
++            sinfo->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++    } else {
++        sinfo->txrate.legacy = rinfo.legacy;
++    }
++
++    /* --- RX BITRATE --- */
++    rtw_get_sta_rxrate(psta, &rinfo); 
++    sinfo->filled |= STATION_INFO_RX_BITRATE;
++    memset(&sinfo->rxrate, 0, sizeof(sinfo->rxrate));
++
++    // OVERRIDE: Samakan perlakuan dengan TX
++    if (psta->htpriv.ht_option == 1) {
++        sinfo->rxrate.flags = RATE_INFO_FLAGS_MCS;
++        sinfo->rxrate.mcs = (rinfo.flags & RATE_INFO_FLAGS_MCS) ? rinfo.mcs : 7;
++        sinfo->rxrate.bw = sinfo->txrate.bw; 
++        
++        // Cek flag GI dari deteksi rtw_get_sta_rxrate (Dinamis: Short/Long GI)
++        if (rinfo.flags & RATE_INFO_FLAGS_SHORT_GI)
++            sinfo->rxrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
++    } else {
++        sinfo->rxrate.legacy = rinfo.legacy;
++    }
++
++    /* Stats & Throughput */
++    sinfo->filled |= STATION_INFO_RX_PACKETS | STATION_INFO_TX_PACKETS | STATION_INFO_TX_FAILED;
++    sinfo->rx_packets = sta_rx_pkts(psta);
++    sinfo->tx_packets = psta->sta_stats.tx_pkts;
++    sinfo->tx_failed = psta->sta_stats.tx_fail_cnt;
++
++    // Kalkulasi Throughput: 110Mbps untuk 40MHz, 55Mbps untuk 20MHz
++    sinfo->filled |= STATION_INFO_EXPECTED_THROUGHPUT;
++    sinfo->expected_throughput = (sinfo->txrate.bw == RATE_INFO_BW_40) ? 110000 : 55000;
+ 
+-	int ret = 0;
+-	_irqL irqL;
+-	_adapter *padapter = (_adapter *)rtw_netdev_priv(ndev);
+-	struct sta_priv *pstapriv = &padapter->stapriv;
+-	struct sta_info *psta = NULL;
+-#ifdef CONFIG_RTW_MESH
+-	struct mesh_plink_ent *plink = NULL;
+-#endif
+-	u8 asoc_list_num;
+-
+-	if (DBG_DUMP_STATION)
+-		RTW_INFO(FUNC_NDEV_FMT"\n", FUNC_NDEV_ARG(ndev));
+-
+-	_enter_critical_bh(&pstapriv->asoc_list_lock, &irqL);
+-	psta = rtw_sta_info_get_by_idx(pstapriv, idx, &asoc_list_num);
+-	_exit_critical_bh(&pstapriv->asoc_list_lock, &irqL);
+-
+-#ifdef CONFIG_RTW_MESH
+-	if (MLME_IS_MESH(padapter)) {
+-		if (psta)
+-			plink = psta->plink;
+-		if (!plink)
+-			plink = rtw_mesh_plink_get_no_estab_by_idx(padapter, idx - asoc_list_num);
+-	}
+-#endif /* CONFIG_RTW_MESH */
+-
+-	if ((!MLME_IS_MESH(padapter) && !psta)
+-		#ifdef CONFIG_RTW_MESH
+-		|| (MLME_IS_MESH(padapter) && !plink)
+-		#endif
+-	) {
+-		if (DBG_DUMP_STATION)
+-			RTW_INFO(FUNC_NDEV_FMT" end with idx:%d\n", FUNC_NDEV_ARG(ndev), idx);
+-		ret = -ENOENT;
+-		goto exit;
+-	}
+-
+-	if (psta)
+-		_rtw_memcpy(mac, psta->cmn.mac_addr, ETH_ALEN);
+-	#ifdef CONFIG_RTW_MESH
+-	else
+-		_rtw_memcpy(mac, plink->addr, ETH_ALEN);
+-	#endif
+-	
+-	sinfo->filled = 0;
+-
+-	if (psta) {
+-		sinfo->filled |= STATION_INFO_SIGNAL;
+-		sinfo->signal = translate_percentage_to_dbm(psta->cmn.rssi_stat.rssi);
+-		sinfo->filled |= STATION_INFO_INACTIVE_TIME;
+-		sinfo->inactive_time = rtw_get_passing_time_ms(psta->sta_stats.last_rx_time);
+-	}
+-
+-#ifdef CONFIG_RTW_MESH
+-	if (MLME_IS_MESH(padapter))
+-		rtw_cfg80211_fill_mesh_only_sta_info(plink, psta, sinfo);
+-#endif
+-
+-exit:
+-	return ret;
++    return 0;
+ }
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28))

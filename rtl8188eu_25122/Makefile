@@ -48,7 +48,11 @@ EXTRA_CFLAGS:= \
   -D_LINUX_BYTEORDER_SWAB_H \
   -DCONFIG_RADIO_WORK \
   -DCONFIG_POWER_SAVING=0 \
-  -DBUILD_OPENWRT
+  -DBUILD_OPENWRT \
+	-Wno-unused-function \
+	-Wno-missing-prototypes \
+	-Wno-missing-declarations \
+	-Wno-empty-body
 
 ifeq ($(CONFIG_BIG_ENDIAN),y)
 	EXTRA_CFLAGS += -DCONFIG_BIG_ENDIAN

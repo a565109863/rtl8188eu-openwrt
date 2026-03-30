@@ -1,0 +1,54 @@
+From: OpenWrt rtl8188eu package
+Subject: getrttbl callback name + rtw_c2h_wk_cmd proto + ieee80211 dumps (rtl8188eu)
+
+- Rename getrttbl callback to match rtw_cmd.h.
+- Declare rtw_c2h_wk_cmd in rtw_cmd.h (implementation stays global in rtw_cmd.c).
+- include/ieee80211.h: declare dump_p2p_ie / dump_wfd_ie without wrapping in
+  CONFIG_RTW_DEBUG.
+
+---
+ core/rtw_cmd.c      |  2 +-
+ include/ieee80211.h | 10 ++++------
+ include/rtw_cmd.h   |  1 +
+ 3 files changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/core/rtw_cmd.c b/core/rtw_cmd.c
+--- a/core/rtw_cmd.c
++++ b/core/rtw_cmd.c
+@@ -5620,7 +5620,7 @@
+
+ }
+
+-void rtw_getrttbl_cmd_cmdrsp_callback(_adapter	*padapter,  struct cmd_obj *pcmd)
++void rtw_getrttbl_cmdrsp_callback(_adapter	*padapter,  struct cmd_obj *pcmd)
+ {
+
+ 	rtw_free_cmd_obj(pcmd);
+diff --git a/include/rtw_cmd.h b/include/rtw_cmd.h
+--- a/include/rtw_cmd.h
++++ b/include/rtw_cmd.h
+@@ -698,6 +698,7 @@ u8 rtw_customer_str_write_cmd(_adapter *adapter, const u8 *cstr);
+ #endif
+
++u8 rtw_c2h_wk_cmd(PADAPTER padapter, u8 *pbuf, u16 length, u8 type);
+ #ifdef CONFIG_FW_C2H_REG
+ u8 rtw_c2h_reg_wk_cmd(_adapter *adapter, u8 *c2h_evt);
+ #endif
+
+diff --git a/include/ieee80211.h b/include/ieee80211.h
+--- a/include/ieee80211.h
++++ b/include/ieee80211.h
+@@ -1941,5 +1941,3 @@ int rtw_p2p_merge_ies(u8 *in_ie, u32 in_len, u8 *merge_ie);
+ int rtw_p2p_merge_ies(u8 *in_ie, u32 in_len, u8 *merge_ie);
+-#ifdef CONFIG_RTW_DEBUG
+-void dump_p2p_ie(void *sel, const u8 *ie, u32 ie_len);
+-#endif
++void dump_p2p_ie(void *sel, const u8 *ie, u32 ie_len);
+ u8 *rtw_get_p2p_ie(const u8 *in_ie, int in_len, u8 *p2p_ie, uint *p2p_ielen);
+@@ -1958,5 +1958,3 @@
+ #ifdef CONFIG_WFD
+-#ifdef CONFIG_RTW_DEBUG
+-void dump_wfd_ie(void *sel, const u8 *ie, u32 ie_len);
+-#endif
++void dump_wfd_ie(void *sel, const u8 *ie, u32 ie_len);
+ u8 *rtw_get_wfd_ie(const u8 *in_ie, int in_len, u8 *wfd_ie, uint *p2p_ielen);
